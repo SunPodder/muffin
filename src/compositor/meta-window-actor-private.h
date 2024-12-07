@@ -91,4 +91,8 @@ gboolean meta_window_actor_is_opaque (MetaWindowActor *self);
 
 void meta_window_actor_update_regions (MetaWindowActor *self);
 
+void meta_window_actor_setup_glsl(MetaWindowActor *self);
+gboolean meta_window_actor_should_clip(MetaWindowActor *self);
+void meta_window_actor_update_clipped_bounds(MetaWindowActor *window_actor);
+
 #endif /* META_WINDOW_ACTOR_PRIVATE_H */

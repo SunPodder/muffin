@@ -54,6 +54,8 @@ typedef struct _MetaWindowActorPrivate
   MetaCompositor *compositor;
 
   MetaSurfaceActor *surface;
+  ClutterEffect *round_clip_effect;
+  gboolean effect_setuped;
 
   int geometry_scale;
 
@@ -216,6 +218,8 @@ meta_window_actor_init (MetaWindowActor *self)
     meta_window_actor_get_instance_private (self);
 
   priv->geometry_scale = 1;
+  priv->round_clip_effect = NULL;
+  priv->effect_setuped = FALSE;
 }
 
 static void
@@ -345,6 +349,100 @@ meta_window_actor_assign_surface_actor (MetaWindowActor  *self,
   META_WINDOW_ACTOR_GET_CLASS (self)->assign_surface_actor (self,
                                                             surface_actor);
 }
+
+
+
+static const gchar
+ROUNDED_CLIP_FRAGMENT_SHADER_CODE[] =
+  "uniform sampler2D tex;                                                   \n"
+  "uniform int will_clip;                                                   \n"
+  "uniform vec4 bounds;           // x, y: top left; w, v: bottom right     \n"
+  "uniform vec4 corner_centers_1; // x, y: top left; w, v: top right        \n"
+  "uniform vec4 corner_centers_2; // x, y: bottom right; w, v: bottom left  \n"
+  "uniform vec2 pixel_step;                                                 \n"
+  "uniform float opacity;                                                   \n"
+  "                                                                         \n"
+  "float                                                                    \n"
+  "ellipsis_dist (vec2 p, vec2 radius)                                      \n"
+  "{                                                                        \n"
+  "  if (radius == vec2(0, 0))                                              \n"
+  "    return 0.0;                                                          \n"
+  "                                                                         \n"
+  "  vec2 p0 = p / radius;                                                  \n"
+  "  vec2 p1 = (2.0 * p0) / radius;                                         \n"
+  "                                                                         \n"
+  "  return (dot(p0, p0) - 1.0) / length (p1);                              \n"
+  "}                                                                        \n"
+  "                                                                         \n"
+  "float                                                                    \n"
+  "ellipsis_coverage (vec2 point, vec2 center, vec2 radius)                 \n"
+  "{                                                                        \n"
+  "  float d = ellipsis_dist ((point - center), radius);                    \n"
+  "  return clamp (0.5 - d, 0.0, 1.0);                                      \n"
+  "}                                                                        \n"
+  "                                                                         \n"
+  "float                                                                    \n"
+  "rounded_rect_coverage (vec4 bounds,                                      \n"
+  "                       vec4 corner_centers_1,                            \n"
+  "                       vec4 corner_centers_2,                            \n"
+  "                       vec2 p)                                           \n"
+  "{                                                                        \n"
+  "  if (p.x < bounds.x || p.y < bounds.y ||                                \n"
+  "      p.x >= bounds.z || p.y >= bounds.w)                                \n"
+  "    return 0.0;                                                          \n"
+  "                                                                         \n"
+  "  vec2 ref_tl = corner_centers_1.xy;                                     \n"
+  "  vec2 ref_tr = corner_centers_1.zw;                                     \n"
+  "  vec2 ref_br = corner_centers_2.xy;                                     \n"
+  "  vec2 ref_bl = corner_centers_2.zw;                                     \n"
+  "                                                                         \n"
+  "  if (p.x >= ref_tl.x && p.x >= ref_bl.x &&                              \n"
+  "      p.x <= ref_tr.x && p.x <= ref_br.x)                                \n"
+  "    return 1.0;                                                          \n"
+  "                                                                         \n"
+  "  if (p.y >= ref_tl.y && p.y >= ref_tr.y &&                              \n"
+  "      p.y <= ref_bl.y && p.y <= ref_br.y)                                \n"
+  "    return 1.0;                                                          \n"
+  "                                                                         \n"
+  "  vec2 rad_tl = corner_centers_1.xy - bounds.xy;                         \n"
+  "  vec2 rad_tr = corner_centers_1.zw - bounds.zy;                         \n"
+  "  vec2 rad_br = corner_centers_2.xy - bounds.zw;                         \n"
+  "  vec2 rad_bl = corner_centers_2.zw - bounds.xw;                         \n"
+  "                                                                         \n"
+  "  float d_tl = ellipsis_coverage(p, ref_tl, rad_tl);                     \n"
+  "  float d_tr = ellipsis_coverage(p, ref_tr, rad_tr);                     \n"
+  "  float d_br = ellipsis_coverage(p, ref_br, rad_br);                     \n"
+  "  float d_bl = ellipsis_coverage(p, ref_bl, rad_bl);                     \n"
+  "                                                                         \n"
+  "  vec4 corner_coverages = 1.0 - vec4(d_tl, d_tr, d_br, d_bl);            \n"
+  "                                                                         \n"
+  "  bvec4 is_out = bvec4(p.x < ref_tl.x && p.y < ref_tl.y,                 \n"
+  "                       p.x > ref_tr.x && p.y < ref_tr.y,                 \n"
+  "                       p.x > ref_br.x && p.y > ref_br.y,                 \n"
+  "                       p.x < ref_bl.x && p.y > ref_bl.y);                \n"
+  "                                                                         \n"
+  "  return 1.0 - dot(vec4(is_out), corner_coverages);                      \n"
+  "}                                                                        \n"
+  "                                                                         \n"
+  "void main()                                                              \n"
+  "{                                                                        \n"
+  "vec2 texture_coord;                                                      \n"
+  "                                                                         \n"
+  "  texture_coord = cogl_tex_coord0_in.xy / pixel_step;                    \n"
+  "  vec4 res;\n"
+  "  if (will_clip == 1) {                                                  \n"
+  "    res =  texture2D(tex, cogl_tex_coord0_in.xy)              \n"
+  "                   *  rounded_rect_coverage(bounds,                      \n"
+  "                                            corner_centers_1,            \n"
+  "                                            corner_centers_2,            \n"
+  "                                            texture_coord);              \n"
+  "  } else {                                                               \n"
+  "      res =  texture2D(tex, cogl_tex_coord0_in.xy);           \n"
+  "  }                                                                      \n"
+  "  res *= opacity;\n"
+  "  cogl_color_out = res;\n"
+  "}";
+
 
 static void
 init_surface_actor (MetaWindowActor *self)
@@ -765,6 +863,111 @@ meta_window_actor_queue_destroy (MetaWindowActor *self)
     clutter_actor_destroy (CLUTTER_ACTOR (self));
 }
 
+
+
+void
+meta_window_actor_update_clipped_bounds(MetaWindowActor *window_actor)
+{
+  MetaWindowActorPrivate *priv =
+    meta_window_actor_get_instance_private(window_actor);
+  MetaWindow *window = priv->window;
+
+  if (window->frame_bounds) {
+    cairo_region_destroy(window->frame_bounds);
+    window->frame_bounds = NULL;
+  }
+}
+
+gboolean
+meta_window_actor_should_clip(MetaWindowActor *self)
+{
+  MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private (self);
+  MetaWindow *window = priv->window;
+  MetaWindowType window_type = meta_window_get_window_type(window);
+
+  return !(
+    window_type == META_WINDOW_DOCK ||
+    window_type == META_WINDOW_POPUP_MENU ||
+    window_type == META_WINDOW_DROPDOWN_MENU ||
+    window_type == META_WINDOW_OVERRIDE_OTHER ||
+    meta_window_get_maximized(window) ||
+    meta_window_get_client_type(window) == META_WINDOW_CLIENT_TYPE_WAYLAND
+  );
+}
+
+void
+meta_window_actor_setup_glsl(MetaWindowActor *self)
+{
+  MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private (self);
+  ClutterShaderEffect *effect = CLUTTER_SHADER_EFFECT(priv->round_clip_effect);
+  MetaSurfaceActor *surface = priv->surface;
+  ClutterActor *actor = CLUTTER_ACTOR(surface);
+  const float r = 12;
+
+   if (surface == NULL)
+    return ;
+
+  if (!priv->effect_setuped)
+  {
+    effect = CLUTTER_SHADER_EFFECT(clutter_shader_effect_new(CLUTTER_FRAGMENT_SHADER));
+
+    if (clutter_shader_effect_set_shader_source(effect,
+                                                ROUNDED_CLIP_FRAGMENT_SHADER_CODE))
+    {
+      clutter_actor_add_effect(actor, CLUTTER_EFFECT(effect));
+      clutter_shader_effect_set_uniform(effect, "tex", G_TYPE_INT, 1, 0);
+    }
+    else
+    {
+      g_object_unref(effect);
+      effect = NULL;
+    }
+    priv->round_clip_effect = CLUTTER_EFFECT(effect);
+    priv->effect_setuped = TRUE;
+  }
+
+  if (effect == NULL)
+    return;
+
+  clutter_shader_effect_set_uniform(effect,"opacity",
+                                    G_TYPE_FLOAT, 1,
+                                    clutter_actor_get_opacity(actor) / 255.0f);
+
+  if (!meta_window_actor_should_clip(self))
+  {
+    clutter_shader_effect_set_uniform(effect, "will_clip", G_TYPE_INT, 1, 0);
+    return ;
+  }
+
+  MetaRectangle frame_rect;
+  MetaRectangle buf_rect;
+  float w, h;
+
+  clutter_actor_get_size(CLUTTER_ACTOR(actor), &w, &h);
+  meta_window_get_frame_rect(priv->window, &frame_rect);
+  meta_window_get_buffer_rect(priv->window, &buf_rect);
+
+  float inner_pix = 1.0f;
+
+  float x1 = frame_rect.x - buf_rect.x + 1.0f + inner_pix;
+  float y1 = frame_rect.y - buf_rect.y + 1.0f + inner_pix;
+  float x2 = frame_rect.x - buf_rect.x + frame_rect.width  - inner_pix;
+  float y2 = frame_rect.y - buf_rect.y + frame_rect.height - inner_pix;
+
+  clutter_shader_effect_set_uniform(effect, "will_clip", G_TYPE_INT, 1, 1);
+  clutter_shader_effect_set_uniform(effect, "bounds", G_TYPE_FLOAT,
+                                    4, x1, y1, x2, y2);
+  clutter_shader_effect_set_uniform(effect, "corner_centers_1", G_TYPE_FLOAT,
+                                    4, x1 + r, y1 + r, x2 - r, y1 + r);
+  clutter_shader_effect_set_uniform(effect, "corner_centers_2", G_TYPE_FLOAT,
+                                    4, x2 - r, y2 - r, x1 + r, y2 - r);
+  clutter_shader_effect_set_uniform(effect, "pixel_step", G_TYPE_FLOAT,
+                                    2, 1. / w, 1. / h);
+}
+
+
+
+
 MetaWindowActorChanges
 meta_window_actor_sync_actor_geometry (MetaWindowActor *self,
                                        gboolean         did_placement)
@@ -825,6 +1028,8 @@ meta_window_actor_sync_actor_geometry (MetaWindowActor *self,
 
   if (changes & META_WINDOW_ACTOR_CHANGE_SIZE)
     clutter_actor_set_size (actor, window_rect.width, window_rect.height);
+
+  meta_window_actor_setup_glsl(self);
 
   return changes;
 }
