@@ -20,6 +20,7 @@
  *     Georges Basile Stavracas Neto <gbsneto@gnome.org>
  */
 
+#include "compositor/meta-window-actor-private.h"
 #include "config.h"
 
 #include "compositor/meta-window-actor-x11.h"
@@ -1127,6 +1128,21 @@ update_opaque_region (MetaWindowActorX11 *actor_x11)
   cairo_region_destroy (opaque_region);
 }
 
+static cairo_region_t *
+meta_window_get_clipped_frame_bounds(MetaWindow *window)
+{
+  if (!window->frame_bounds)
+  {
+    MetaRectangle frame_rect = window->rect;
+    MetaRectangle buff_rect = window->buffer_rect;
+    frame_rect.x = frame_rect.x - buff_rect.x;
+    frame_rect.y = frame_rect.y - buff_rect.y;
+    window->frame_bounds = meta_ui_frame_get_bounds_clipped(&frame_rect, 12);
+  }
+  return window->frame_bounds;
+}
+
+
 static void
 update_frame_bounds (MetaWindowActorX11 *actor_x11)
 {
@@ -1134,8 +1150,13 @@ update_frame_bounds (MetaWindowActorX11 *actor_x11)
     meta_window_actor_get_meta_window (META_WINDOW_ACTOR (actor_x11));
 
   g_clear_pointer (&actor_x11->frame_bounds, cairo_region_destroy);
-  actor_x11->frame_bounds =
-    cairo_region_copy (meta_window_get_frame_bounds (window));
+
+  if (meta_window_actor_should_clip(META_WINDOW_ACTOR(actor_x11)))
+    actor_x11->frame_bounds =
+      cairo_region_copy (meta_window_get_clipped_frame_bounds(window));
+  else
+    actor_x11->frame_bounds =
+      cairo_region_copy (meta_window_get_frame_bounds (window));
 }
 
 static void

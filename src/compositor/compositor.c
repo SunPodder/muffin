@@ -1200,7 +1200,11 @@ meta_compositor_sync_window_geometry (MetaCompositor *compositor,
   changes = meta_window_actor_sync_actor_geometry (window_actor, did_placement);
 
   if (changes & META_WINDOW_ACTOR_CHANGE_SIZE)
+  {
+    if (meta_window_actor_should_clip(window_actor))
+      meta_window_actor_update_clipped_bounds(window_actor);
     meta_plugin_manager_event_size_changed (priv->plugin_mgr, window_actor);
+  }
 }
 
 static void
