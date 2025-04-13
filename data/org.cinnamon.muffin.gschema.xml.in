@@ -14,6 +14,63 @@
 
   <schema id="org.cinnamon.muffin" path="/org/cinnamon/muffin/"
           gettext-domain="@GETTEXT_DOMAIN@">
+    
+    <key name="top-corner-radius" type="i">
+      <default>8</default>
+      <range min="0" max="100"/>
+      <summary>Top corner radius</summary>
+    </key>
+
+    <key name="bottom-corner-radius" type="i">
+      <default>8</default>
+      <range min="0" max="100"/>
+      <summary>Bottom corner radius</summary>
+    </key>
+
+    <key name="clip-edge-padding" type="s">
+      <default>"{\"global\": [0, 0, 0, 0], \"apps\": {}}"</default>
+      <summary>padding of window will be clipped</summary>
+      <description>
+        A JSON string, Represents the clipping range of the window edge.
+        The array represents the clipping range of the four sides (left,
+        right, top, bottom) of the window.
+
+        The key of "apps" object represent the instance part of the window's
+        `WM_CLASS` property, as same as the output of `xprop WM_CLASS|cut -d 
+        \" -f 2`
+
+        This is a example:
+
+        {
+          'global': [1, 2, 3, 4],
+          'apps': {
+            'code': [5, 6, 7, 8],
+            'typora': [9, 10, 11, 12]
+          }
+        }
+
+        For all window, cut the left, right, top and bottom sides by 1, 2,
+        3 and 4 pixels respectively. But for Visual Studio Code and
+        Typora, we will cut different pixels.        
+      </description>
+    </key>
+
+    <key name="round-corner-black-list" type="as">
+      <default>[]</default>
+      <summary>Window here will not be rounded</summary>
+      <description>
+        The contents of the list represent the instance part of the window's
+        `WM_CLASS`, as same as the output of `xprop WM_CLASS|cut -d \" -f 2`
+      </description>
+    </key>
+
+    <key name="rounded-in-maximized" type="b">
+      <default>false</default>
+      <summary>Enable rounded corners when windows maximized</summary>
+      <description>
+        When true, the windows will always be clipped when be maximized.
+      </description>
+    </key>
 
     <key name="overlay-key" type="s">
       <default>''</default>
