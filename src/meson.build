@@ -290,6 +290,8 @@ mutter_sources = [
   'compositor/meta-background-group.c',
   'compositor/meta-background-image.c',
   'compositor/meta-background-private.h',
+  'compositor/meta-clip-effect.c',
+  'compositor/meta-clip-effect.h',
   'compositor/meta-compositor-x11.c',
   'compositor/meta-compositor-x11.h',
   'compositor/meta-cullable.c',
