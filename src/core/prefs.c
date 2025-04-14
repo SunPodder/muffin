@@ -38,6 +38,8 @@
 #include "core/meta-accel-parse.h"
 #include "core/util-private.h"
 #include "meta/prefs.h"
+#include "glibconfig.h"
+#include "json-glib/json-glib.h"
 #include "x11/meta-x11-display-private.h"
 
 /* If you add a key, it needs updating in init() and in the gsettings
@@ -121,11 +123,16 @@ static char *cursor_theme = NULL;
 static int   cursor_size = 24;
 static int   draggable_border_width = 10;
 static int   drag_threshold;
+static int   top_corner_radius = 8;
+static int   bottom_corner_radius = 8;
+static gboolean rounded_in_maximized = FALSE;
 static gboolean resize_with_right_button = FALSE;
 static gboolean edge_tiling = FALSE;
 static gboolean force_fullscreen = TRUE;
 static gboolean auto_maximize = TRUE;
 static gboolean show_fallback_app_menu = TRUE;
+static JsonNode *clip_edge_padding = NULL;
+static char **round_corner_blacklist = NULL;
 
 static CDesktopVisualBellType visual_bell_type = C_DESKTOP_VISUAL_BELL_FULLSCREEN_FLASH;
 static MetaButtonLayout button_layout;
@@ -171,6 +178,7 @@ static gboolean mouse_button_mods_zoom_handler (GVariant*, gpointer*, gpointer);
 static gboolean button_layout_handler (GVariant*, gpointer*, gpointer);
 static gboolean overlay_key_handler (GVariant*, gpointer*, gpointer);
 static gboolean locate_pointer_key_handler (GVariant*, gpointer*, gpointer);
+static gboolean clip_edge_padding_handler (GVariant*, gpointer*, gpointer);
 
 static gboolean iso_next_group_handler (GVariant*, gpointer*, gpointer);
 
@@ -478,6 +486,13 @@ static MetaBoolPreference preferences_bool[] =
       },
       &bring_user_activated_windows_to_current_workspace,
     },
+    {
+      { "rounded-in-maximized",
+        SCHEMA_MUFFIN,
+        META_PREF_ROUNDED_IN_MAXIMIZED,
+      },
+      &rounded_in_maximized,
+    },
     { { NULL, 0, 0 }, NULL },
   };
 
@@ -555,6 +570,14 @@ static MetaStringPreference preferences_string[] =
       NULL,
       &bell_sound,
     },
+    {
+      { "clip-edge-padding",
+        SCHEMA_MUFFIN,
+        META_PREF_CLIP_EDGE_PADDING,
+      },
+      clip_edge_padding_handler,
+      NULL,
+    },
     { { NULL, 0, 0 }, NULL },
   };
 
@@ -575,6 +598,14 @@ static MetaStringArrayPreference preferences_string_array[] =
       },
       iso_next_group_handler,
       NULL,
+    },
+    {
+      { "round-corner-black-list",
+        SCHEMA_MUFFIN,
+        META_PREF_ROUND_CORNER_BLACKLIST,
+      },
+      NULL,
+      &round_corner_blacklist,
     },
     { { NULL, 0, 0 }, NULL },
   };
@@ -615,6 +646,20 @@ static MetaIntPreference preferences_int[] =
         META_PREF_CURSOR_SIZE,
       },
       &cursor_size
+    },
+    {
+      { "top-corner-radius",
+        SCHEMA_MUFFIN,
+        META_PREF_TOP_CORNER_RADIUS
+      },
+      &top_corner_radius
+    },
+    {
+      { "bottom-corner-radius",
+        SCHEMA_MUFFIN,
+        META_PREF_BOTTOM_CORNER_RADIUS
+      },
+      &bottom_corner_radius
     },
     { { NULL, 0, 0 }, NULL },
   };
@@ -1760,6 +1805,81 @@ locate_pointer_key_handler (GVariant *value,
 }
 
 static gboolean
+clip_edge_padding_handler (GVariant *value,
+                           gpointer *result,
+                           gpointer  data)
+{
+  /* json string looks like this:
+   * 
+   * {
+   *    // array represent the clip padding of window: [left, right, top, bottom]
+   *    "global": [1, 1, 1, 1],
+   *    // special app settings,
+   *    "apps": {
+   *       // second part in `WM_CLASS` property of a window
+   *       "Typora": [0, 0, 0, 0],
+   *       ...
+   *    }
+   * } 
+   */
+
+  JsonNode *json;
+  JsonObject *obj;
+  JsonArray *arr;
+  JsonNode *element;
+  JsonObject *apps_obj;
+  GList *app_names;
+
+  const char *string_value;
+  GError *error = NULL;
+
+  *result = NULL;
+  string_value = g_variant_get_string(value, NULL);
+  json = json_from_string(string_value, &error);
+
+  if (error)
+  {
+    meta_topic(META_DEBUG_PREFS, "Failed to parse value for clip-edge-padding: %s", error->message);
+    g_error_free(error);
+    return FALSE;
+  }
+
+  if (!JSON_NODE_HOLDS_OBJECT(json))
+    goto failed;
+
+  obj = json_node_get_object(json);
+  arr = json_object_get_array_member(obj, "global");
+  if (!arr || json_array_get_length(arr) != 4)
+    goto failed;
+  
+  if (!(element = json_object_get_member(obj, "apps")))
+    goto failed;
+  if (!JSON_NODE_HOLDS_OBJECT(element))
+    goto failed;
+  apps_obj = json_node_get_object(element);
+
+  app_names = json_object_get_members(apps_obj);
+  for (GList *l = app_names; l != NULL; l = l->next)
+  {
+    arr = json_object_get_array_member(apps_obj, l->data);
+    if (!arr || json_array_get_length(arr) != 4)
+      goto failed;
+  }
+
+  if (clip_edge_padding != NULL)
+    json_node_unref(clip_edge_padding);
+  clip_edge_padding = json;
+  queue_changed(META_PREF_CLIP_EDGE_PADDING);
+
+  return TRUE;
+
+failed:
+  meta_topic(META_DEBUG_PREFS, "Failed to parse value for clip-edge-padding");
+  json_node_unref(json);
+  return FALSE;
+}
+
+static gboolean
 iso_next_group_handler (GVariant *value,
                         gpointer *result,
                         gpointer  data)
@@ -1948,6 +2068,21 @@ meta_preference_to_string (MetaPreference pref)
 
     case META_PREF_CHECK_ALIVE_TIMEOUT:
       return "CHECK_ALIVE_TIMEOUT";
+
+    case META_PREF_TOP_CORNER_RADIUS:
+      return "TOP_CORNER_RADIUS";
+    
+    case META_PREF_BOTTOM_CORNER_RADIUS:
+      return "BOTTOM_CORNER_RADIUS";
+
+    case META_PREF_CLIP_EDGE_PADDING:
+      return "CLIP_EDGE_PADDING";
+
+    case META_PREF_ROUND_CORNER_BLACKLIST:
+      return "ROUND_CORNER_BLACKLIST";
+
+    case META_PREF_ROUNDED_IN_MAXIMIZED:
+      return "ROUNDED_IN_MAXIMIZED";
 
     case META_PREF_UNREDIRECT_FULLSCREEN_WINDOWS:
       return "UNREDIRECT_FULLSCREEN_WINDOWS";
@@ -2467,6 +2602,66 @@ void
 meta_prefs_set_force_fullscreen (gboolean whether)
 {
   force_fullscreen = whether;
+}
+
+int
+meta_prefs_get_top_corner_radius()
+{
+  return top_corner_radius;
+}
+
+int
+meta_prefs_get_bottom_corner_radius()
+{
+  return bottom_corner_radius;
+}
+
+void
+meta_prefs_get_clip_edge_padding (const char *name, int padding[4])
+{
+  JsonObject *obj;
+  JsonArray *arr;
+
+  if (!clip_edge_padding || !name) {
+    padding[0] = 0;
+    padding[1] = 0;
+    padding[2] = 0;
+    padding[3] = 0;
+    return;
+  }
+
+  obj = json_node_get_object(clip_edge_padding);
+  arr = json_object_get_array_member(obj, "global");
+  obj = json_object_get_object_member(obj, "apps");
+
+  if (json_object_has_member(obj, name))
+    arr = json_object_get_array_member(obj, name);
+
+  // array: { left, right, top, bottom }
+  padding[0] = json_array_get_int_element(arr, 0) + 1;
+  padding[1] = json_array_get_int_element(arr, 1);
+  padding[2] = json_array_get_int_element(arr, 2) + 1;
+  padding[3] = json_array_get_int_element(arr, 3);
+}
+
+gboolean
+meta_prefs_in_round_corner_black_list(const char *name)
+{
+  g_return_val_if_fail(round_corner_blacklist, FALSE);
+
+  int length = g_strv_length(round_corner_blacklist);
+
+  for (int i = 0; i < length; i++)
+    if (g_strcmp0(round_corner_blacklist[i], name) == 0)
+      return TRUE;
+
+  return FALSE;
+}
+
+gboolean
+meta_prefs_get_rounded_in_maximized()
+{
+  return rounded_in_maximized;
 }
 
 MetaX11BackgroundTransition

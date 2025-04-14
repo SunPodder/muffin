@@ -114,6 +114,11 @@ typedef enum
   META_PREF_DRAG_THRESHOLD,
   META_PREF_LOCATE_POINTER,
   META_PREF_CHECK_ALIVE_TIMEOUT,
+  META_PREF_TOP_CORNER_RADIUS,
+  META_PREF_BOTTOM_CORNER_RADIUS,
+  META_PREF_CLIP_EDGE_PADDING,
+  META_PREF_ROUND_CORNER_BLACKLIST,
+  META_PREF_ROUNDED_IN_MAXIMIZED,
   META_PREF_BACKGROUND_TRANSITION,
   META_PREF_UNREDIRECT_FULLSCREEN_WINDOWS,
   META_PREF_WORKSPACE_CYCLE,
@@ -268,6 +273,21 @@ int      meta_prefs_get_draggable_border_width (void);
 
 META_EXPORT
 int      meta_prefs_get_drag_threshold (void);
+
+META_EXPORT
+int      meta_prefs_get_top_corner_radius (void);
+
+META_EXPORT
+int      meta_prefs_get_bottom_corner_radius (void);
+
+META_EXPORT
+void     meta_prefs_get_clip_edge_padding (const char *name, int padding[4]);
+
+META_EXPORT
+gboolean meta_prefs_in_round_corner_black_list(const char *name);
+
+META_EXPORT
+gboolean meta_prefs_get_rounded_in_maximized(void);
 
 META_EXPORT
 gboolean    meta_prefs_get_unredirect_fullscreen_windows (void);
