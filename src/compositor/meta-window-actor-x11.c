@@ -20,6 +20,7 @@
  *     Georges Basile Stavracas Neto <gbsneto@gnome.org>
  */
 
+#include "compositor/meta-window-actor-private.h"
 #include "config.h"
 
 #include "compositor/meta-window-actor-x11.h"
@@ -38,6 +39,7 @@
 #include "meta/meta-shadow-factory.h"
 #include "meta/meta-window-actor.h"
 #include "meta/meta-x11-errors.h"
+#include "meta/prefs.h"
 #include "meta/window.h"
 #include "x11/meta-x11-display-private.h"
 #include "x11/window-x11.h"
@@ -399,6 +401,7 @@ surface_size_changed (MetaSurfaceActor *actor,
   MetaWindowActorX11 *actor_x11 = META_WINDOW_ACTOR_X11 (user_data);
 
   meta_window_actor_x11_update_shape (actor_x11);
+  meta_window_actor_update_glsl(META_WINDOW_ACTOR(actor_x11));
 }
 
 static void
@@ -519,6 +522,9 @@ has_shadow (MetaWindowActorX11 *actor_x11)
    * the restriction about not putting a shadow around ARGB windows.
    */
   if (meta_window_get_frame (window))
+    return TRUE;
+
+  if (meta_window_actor_should_clip(META_WINDOW_ACTOR(actor_x11)))
     return TRUE;
 
   /*
@@ -670,6 +676,9 @@ clip_shadow_under_window (MetaWindowActorX11 *actor_x11)
     meta_window_actor_get_meta_window (META_WINDOW_ACTOR (actor_x11));
 
   if (window->frame)
+    return TRUE;
+
+  if (meta_window_actor_should_clip(META_WINDOW_ACTOR(actor_x11)))
     return TRUE;
 
   return meta_window_actor_is_opaque (META_WINDOW_ACTOR (actor_x11));
@@ -1012,6 +1021,11 @@ update_shape_region (MetaWindowActorX11 *actor_x11)
     {
       region = cairo_region_reference (window->shape_region);
     }
+  else if (meta_window_actor_should_clip(META_WINDOW_ACTOR(actor_x11)) && !window->frame)
+    {
+      meta_window_actor_get_corner_rect(META_WINDOW_ACTOR(actor_x11), &client_area);
+      region = cairo_region_create_rectangle (&client_area);
+    }
   else
     {
       /* If we don't have a shape on the server, that means that
@@ -1127,6 +1141,24 @@ update_opaque_region (MetaWindowActorX11 *actor_x11)
   cairo_region_destroy (opaque_region);
 }
 
+static cairo_region_t *
+meta_window_get_clipped_frame_bounds(MetaWindow *window)
+{
+  g_return_val_if_fail(window, NULL);
+
+  MetaWindowActor *actor = meta_window_actor_from_window(window);
+  if (actor && !window->frame_bounds)
+  {
+    MetaRectangle rect;
+    meta_window_actor_get_corner_rect(actor, &rect);
+    window->frame_bounds = 
+      meta_ui_frame_get_bounds_clipped(&rect,
+                                       meta_prefs_get_top_corner_radius(),
+                                       meta_prefs_get_bottom_corner_radius());
+  }
+  return window->frame_bounds;
+}
+
 static void
 update_frame_bounds (MetaWindowActorX11 *actor_x11)
 {
@@ -1134,8 +1166,13 @@ update_frame_bounds (MetaWindowActorX11 *actor_x11)
     meta_window_actor_get_meta_window (META_WINDOW_ACTOR (actor_x11));
 
   g_clear_pointer (&actor_x11->frame_bounds, cairo_region_destroy);
-  actor_x11->frame_bounds =
-    cairo_region_copy (meta_window_get_frame_bounds (window));
+
+  if (meta_window_actor_should_clip(META_WINDOW_ACTOR(actor_x11)))
+    actor_x11->frame_bounds =
+      cairo_region_copy(meta_window_get_clipped_frame_bounds(window));
+  else
+    actor_x11->frame_bounds =
+      cairo_region_copy (meta_window_get_frame_bounds (window));
 }
 
 static void
@@ -1256,7 +1293,11 @@ meta_window_actor_x11_paint (ClutterActor        *actor,
       cairo_region_t *clip = actor_x11->shadow_clip;
       CoglFramebuffer *framebuffer;
 
-      get_shape_bounds (actor_x11, &shape_bounds);
+      if (meta_window_actor_should_clip(META_WINDOW_ACTOR(actor_x11)))
+        meta_window_actor_get_corner_rect(META_WINDOW_ACTOR(actor_x11), &shape_bounds);
+      else
+        get_shape_bounds (actor_x11, &shape_bounds);
+
       get_shadow_params (actor_x11, appears_focused, &params);
 
       /* The frame bounds are already subtracted from actor_x11->shadow_clip

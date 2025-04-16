@@ -1200,7 +1200,11 @@ meta_compositor_sync_window_geometry (MetaCompositor *compositor,
   changes = meta_window_actor_sync_actor_geometry (window_actor, did_placement);
 
   if (changes & META_WINDOW_ACTOR_CHANGE_SIZE)
+  {
+    if (meta_window_actor_should_clip(window_actor))
+      meta_window_actor_update_clipped_bounds(window_actor);
     meta_plugin_manager_event_size_changed (priv->plugin_mgr, window_actor);
+  }
 }
 
 static void
@@ -1369,12 +1373,46 @@ meta_compositor_get_property (GObject    *object,
 }
 
 static void
+prefs_changed_cb(MetaPreference pref,
+                 gpointer       user_data)
+{
+  MetaCompositor *compositor = user_data;
+  MetaCompositorPrivate *priv =
+    meta_compositor_get_instance_private (compositor);
+  GList *l;
+
+  for (l = priv->windows; l; l = l->next)
+  {
+    switch (pref)
+    {
+    case META_PREF_TOP_CORNER_RADIUS:
+    case META_PREF_BOTTOM_CORNER_RADIUS:
+    case META_PREF_CLIP_EDGE_PADDING:
+      if (pref == META_PREF_CLIP_EDGE_PADDING)
+        meta_window_actor_update_clip_padding (l->data);
+      
+      meta_window_actor_update_clipped_bounds (l->data);
+      meta_window_actor_update_glsl (l->data);
+      clutter_actor_queue_redraw (CLUTTER_ACTOR (l->data));
+      break;
+    case META_PREF_ROUNDED_IN_MAXIMIZED:
+      meta_window_actor_update_glsl (l->data);
+      break;
+    default:
+      break;
+    }
+  }
+}
+
+static void
 meta_compositor_init (MetaCompositor *compositor)
 {
   MetaCompositorPrivate *priv =
     meta_compositor_get_instance_private (compositor);
   MetaBackend *backend = meta_get_backend ();
   ClutterBackend *clutter_backend = meta_backend_get_clutter_backend (backend);
+
+  meta_prefs_add_listener(prefs_changed_cb, compositor);
 
   priv->context = clutter_backend->cogl_context;
 
@@ -1396,6 +1434,8 @@ meta_compositor_dispose (GObject *object)
   MetaCompositor *compositor = META_COMPOSITOR (object);
   MetaCompositorPrivate *priv =
     meta_compositor_get_instance_private (compositor);
+
+  meta_prefs_remove_listener(prefs_changed_cb, compositor);
 
   g_clear_signal_handler (&priv->stage_after_paint_id, priv->stage);
   g_clear_signal_handler (&priv->stage_presented_id, priv->stage);

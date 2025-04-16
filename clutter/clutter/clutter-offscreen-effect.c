@@ -221,6 +221,19 @@ update_fbo (ClutterEffect *effect,
       return FALSE;
     }
 
+  ClutterOffscreenEffectClass *offscreen_class =
+    CLUTTER_OFFSCREEN_EFFECT_GET_CLASS (self);
+  if (offscreen_class->create_pipeline != NULL)
+    {
+      CoglPipeline *pipeline =
+        offscreen_class->create_pipeline (self, priv->texture);
+    if (pipeline)
+      {
+        g_clear_pointer (&priv->target, cogl_object_unref);
+        priv->target = pipeline;
+      }
+  }
+
   return TRUE;
 }
 
