@@ -279,7 +279,6 @@ meta_frame_layout_sync_with_style (MetaFrameLayout *layout,
   GtkBorder border;
   GtkRequisition requisition;
   GdkRectangle clip_rect;
-  int border_radius, max_radius;
 
   meta_style_info_set_flags (style_info, flags);
 
@@ -300,20 +299,19 @@ meta_frame_layout_sync_with_style (MetaFrameLayout *layout,
     return; /* border-only - be done */
 
   style = style_info->styles[META_STYLE_ELEMENT_TITLEBAR];
-  gtk_style_context_get (style, gtk_style_context_get_state (style),
-                         "border-radius", &border_radius,
-                         NULL);
   /* GTK+ currently does not allow us to look up radii of individual
    * corners; however we don't clip the client area, so with the
    * current trend of using small/no visible frame borders, most
    * themes should work fine with this.
    */
-  layout->top_left_corner_rounded_radius = border_radius;
-  layout->top_right_corner_rounded_radius = border_radius;
-  max_radius = MIN (layout->frame_border.bottom, layout->frame_border.left);
-  layout->bottom_left_corner_rounded_radius = MAX (border_radius, max_radius);
-  max_radius = MIN (layout->frame_border.bottom, layout->frame_border.right);
-  layout->bottom_right_corner_rounded_radius = MAX (border_radius, max_radius);
+
+  float top_radius = meta_prefs_get_top_corner_radius();
+  float bottom_radius = meta_prefs_get_bottom_corner_radius();
+
+  layout->top_left_corner_rounded_radius = top_radius;
+  layout->top_right_corner_rounded_radius = top_radius;
+  layout->bottom_left_corner_rounded_radius = bottom_radius;
+  layout->bottom_right_corner_rounded_radius = bottom_radius;
 
   get_min_size (style, &layout->titlebar_min_size);
   get_padding_and_border (style, &layout->titlebar_border);
@@ -653,10 +651,12 @@ meta_frame_layout_calc_geometry (MetaFrameLayout        *layout,
   else
     min_size_for_rounding = 5 * scale;
 
-  fgeom->top_left_corner_rounded_radius = 0;
-  fgeom->top_right_corner_rounded_radius = 0;
-  fgeom->bottom_left_corner_rounded_radius = 0;
-  fgeom->bottom_right_corner_rounded_radius = 0;
+  float top_radius = layout->top_left_corner_rounded_radius;
+  float bottom_radius = layout->bottom_left_corner_rounded_radius;
+  fgeom->top_left_corner_rounded_radius = top_radius;
+  fgeom->top_right_corner_rounded_radius = top_radius;
+  fgeom->bottom_left_corner_rounded_radius = bottom_radius;
+  fgeom->bottom_right_corner_rounded_radius = bottom_radius;
 
   if (borders.visible.top + borders.visible.left >= min_size_for_rounding)
     fgeom->top_left_corner_rounded_radius = layout->top_left_corner_rounded_radius * scale;
