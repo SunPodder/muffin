@@ -83,8 +83,7 @@ meta_clip_effect_class_init(MetaClipEffectClass *klass)
 
   meta_class->set_actor = meta_clip_effect_set_actor;
   effect_class->pre_paint = meta_clip_effect_pre_paint;
-  // TODO: create_pipeline doesn't exist in the current version of clutter
-  // offscreen_class->create_pipeline = meta_clip_effect_class_create_pipeline;
+  offscreen_class->create_pipeline = meta_clip_effect_class_create_pipeline;
   gobject_class->dispose = meta_clip_effect_dispose;
 }
 
