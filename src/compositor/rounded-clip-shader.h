@@ -4,8 +4,16 @@
 "float                                                                              \n"\
 "rounded_rect_coverage (vec2 p, vec4 bounds, float top_radius, float bottom_radius) \n"\
 "{                                                                                  \n"\
+"  // Early exit if point is outside bounds                                         \n"\
 "  if (p.x < bounds.x || p.x > bounds.z || p.y < bounds.y || p.y > bounds.w)        \n"\
 "    return 0.0;                                                                    \n"\
+"                                                                                   \n"\
+"  // Clamp radii to reasonable values to avoid overlapping corners                 \n"\
+"  float rect_width = bounds.z - bounds.x;                                          \n"\
+"  float rect_height = bounds.w - bounds.y;                                         \n"\
+"  float max_radius = min(rect_width, rect_height) * 0.5;                           \n"\
+"  top_radius = clamp(top_radius, 0.0, max_radius);                                 \n"\
+"  bottom_radius = clamp(bottom_radius, 0.0, max_radius);                           \n"\
 "                                                                                   \n"\
 "  float center_x;                                                                  \n"\
 "  float center_y;                                                                  \n"\
@@ -33,6 +41,10 @@
 "    return 1.0;                                                                    \n"\
 "  }                                                                                \n"\
 "                                                                                   \n"\
+"  // Handle zero radius case                                                      \n"\
+"  if (clip_radius <= 0.0)                                                        \n"\
+"    return 1.0;                                                                   \n"\
+"                                                                                  \n"\
 "  vec2 delta = p - vec2(center_x, center_y);                                       \n"\
 "  float dist_squared = dot(delta, delta);                                          \n"\
 "                                                                                   \n"\

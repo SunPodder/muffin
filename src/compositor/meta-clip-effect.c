@@ -140,14 +140,24 @@ meta_clip_effect_set_bounds(MetaClipEffect        *effect,
 
   MetaClipEffectPrivate *priv = meta_clip_effect_get_instance_private(effect);
 
-  g_return_if_fail(priv->pipeline && priv->actor);
+  g_return_if_fail(priv->pipeline && priv->actor && _bounds);
+  
   float top_radius = meta_prefs_get_top_corner_radius();
   float bottom_radius = meta_prefs_get_bottom_corner_radius();
 
-  priv->bounds.x = _bounds->x + padding[0];
-  priv->bounds.y = _bounds->y + padding[2];
-  priv->bounds.width =  _bounds->width  - padding[1] - padding[0];
-  priv->bounds.height = _bounds->height - padding[2] - padding[3];
+  // Ensure we have valid padding values
+  int safe_padding[4] = {0, 0, 0, 0};
+  if (padding) {
+    safe_padding[0] = MAX(0, padding[0]);
+    safe_padding[1] = MAX(0, padding[1]);
+    safe_padding[2] = MAX(0, padding[2]);
+    safe_padding[3] = MAX(0, padding[3]);
+  }
+
+  priv->bounds.x = _bounds->x + safe_padding[0];
+  priv->bounds.y = _bounds->y + safe_padding[2];
+  priv->bounds.width = MAX(1, _bounds->width - safe_padding[1] - safe_padding[0]);
+  priv->bounds.height = MAX(1, _bounds->height - safe_padding[2] - safe_padding[3]);
 
   float x1 = priv->bounds.x;
   float y1 = priv->bounds.y;
@@ -156,9 +166,13 @@ meta_clip_effect_set_bounds(MetaClipEffect        *effect,
   float w, h;
 
   clutter_actor_get_size(priv->actor, &w, &h);
+  
+  // Avoid division by zero
+  if (w <= 0.0f) w = 1.0f;
+  if (h <= 0.0f) h = 1.0f;
 
   float bounds[] = { x1, y1, x2, y2 };
-  float pixel_step[] = { 1. / w, 1. / h };
+  float pixel_step[] = { 1.0f / w, 1.0f / h };
 
   cogl_pipeline_set_uniform_float(priv->pipeline,
                                   priv->bounds_uniform,

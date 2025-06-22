@@ -1383,20 +1383,27 @@ prefs_changed_cb(MetaPreference pref,
 
   for (l = priv->windows; l; l = l->next)
   {
+    MetaWindowActor *window_actor = l->data;
+    
+    // Verify the window actor is still valid
+    if (!META_IS_WINDOW_ACTOR(window_actor))
+      continue;
+      
     switch (pref)
     {
     case META_PREF_TOP_CORNER_RADIUS:
     case META_PREF_BOTTOM_CORNER_RADIUS:
     case META_PREF_CLIP_EDGE_PADDING:
       if (pref == META_PREF_CLIP_EDGE_PADDING)
-        meta_window_actor_update_clip_padding (l->data);
+        meta_window_actor_update_clip_padding (window_actor);
       
-      meta_window_actor_update_clipped_bounds (l->data);
-      meta_window_actor_update_glsl (l->data);
-      clutter_actor_queue_redraw (CLUTTER_ACTOR (l->data));
+      meta_window_actor_update_clipped_bounds (window_actor);
+      meta_window_actor_update_glsl (window_actor);
+      clutter_actor_queue_redraw (CLUTTER_ACTOR (window_actor));
       break;
     case META_PREF_ROUNDED_IN_MAXIMIZED:
-      meta_window_actor_update_glsl (l->data);
+      meta_window_actor_update_glsl (window_actor);
+      clutter_actor_queue_redraw (CLUTTER_ACTOR (window_actor));
       break;
     default:
       break;

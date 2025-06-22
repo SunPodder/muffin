@@ -167,10 +167,16 @@ check_meta_window_surface_actor(MetaWindowActor *self)
 
   if (!priv->effect_setuped && surface && priv->round_clip_effect)
   {
+    // Remove any existing effect first to avoid duplicates
+    ClutterEffect *existing_effect = clutter_actor_get_effect(CLUTTER_ACTOR(surface), "Rounded Corners Effect(Surface)");
+    if (existing_effect) {
+      clutter_actor_remove_effect(CLUTTER_ACTOR(surface), existing_effect);
+    }
+    
     clutter_actor_add_effect_with_name(CLUTTER_ACTOR(surface),
                                        "Rounded Corners Effect(Surface)",
                                        CLUTTER_EFFECT(priv->round_clip_effect));
-    priv->effect_setuped = true;
+    priv->effect_setuped = TRUE;
   }
 }
 
@@ -182,7 +188,7 @@ meta_window_actor_update_glsl(MetaWindowActor *self)
   MetaWindow *window = meta_window_actor_get_meta_window(self);
   MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private(self);
 
-  if(!priv->round_clip_effect)
+  if (!priv->round_clip_effect || !window)
     return;
 
   check_meta_window_surface_actor(self);
@@ -205,8 +211,18 @@ meta_window_actor_update_glsl(MetaWindowActor *self)
   if (bounds.width <= 0 || bounds.height <= 0)
     return;
 
-  if (priv->clip_padding[0] == -1 && window->res_name)
-    meta_prefs_get_clip_edge_padding(window->res_name, priv->clip_padding);
+  // Initialize clip padding if not already done
+  if (priv->clip_padding[0] == -1) {
+    if (window->res_name) {
+      meta_prefs_get_clip_edge_padding(window->res_name, priv->clip_padding);
+    } else {
+      // Use default padding if res_name is not available
+      priv->clip_padding[0] = 0;
+      priv->clip_padding[1] = 0;
+      priv->clip_padding[2] = 0;
+      priv->clip_padding[3] = 0;
+    }
+  }
 
   meta_clip_effect_set_bounds(priv->round_clip_effect, &bounds, priv->clip_padding);
 }
@@ -217,10 +233,14 @@ _meta_window_actor_should_clip(MetaWindowActor *self)
   MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private (self);
   MetaWindow *window = priv->window;
 
+  if (!window)
+    return FALSE;
+
+  if (!window->res_name)
+    return meta_window_is_normal(self);
+
   if (meta_prefs_in_round_corner_black_list(window->res_name))
-    {
-      return FALSE;
-    }
+    return FALSE;
 
   return meta_window_is_normal(self);
 }
@@ -230,8 +250,11 @@ meta_window_actor_should_clip(MetaWindowActor *self)
 {
   MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private (self);
 
+  if (!priv->window)
+    return FALSE;
+
   return priv->should_clip  && 
-        !((meta_window_get_maximized(priv->window) && !meta_prefs_get_rounded_in_maximized())
+        !((meta_window_get_maximized(priv->window) == META_MAXIMIZE_BOTH && !meta_prefs_get_rounded_in_maximized())
           || meta_window_is_fullscreen(priv->window)); 
 }
 
@@ -240,16 +263,33 @@ meta_window_actor_get_corner_rect(MetaWindowActor *self,
                                   MetaRectangle *rect)
 {
   MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private(self);
-  g_return_if_fail(priv->round_clip_effect);
-  meta_clip_effect_get_bounds(priv->round_clip_effect, rect);
+  
+  if (!priv->round_clip_effect || !rect) {
+    if (rect) {
+      rect->x = 0;
+      rect->y = 0;
+      rect->width = 0;
+      rect->height = 0;
+    }
+    return;
+  }
+
+  cairo_rectangle_int_t bounds;
+  meta_clip_effect_get_bounds(priv->round_clip_effect, &bounds);
+  
+  rect->x = bounds.x;
+  rect->y = bounds.y;
+  rect->width = bounds.width;
+  rect->height = bounds.height;
 }
 
 void meta_window_actor_update_clip_padding(MetaWindowActor *self)
 {
   MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private(self);
-  if(priv->round_clip_effect)
+  if (priv->round_clip_effect && priv->window && priv->window->res_name) {
     meta_prefs_get_clip_edge_padding(priv->window->res_name,
                                      priv->clip_padding);
+  }
 }
                                   
 static void
@@ -503,14 +543,41 @@ init_surface_actor (MetaWindowActor *self)
 }
 
 static void
-on_wm_class_changed (MetaWindow *self,
+on_wm_class_changed (MetaWindow *window,
                      gpointer    user_data)
 {
-  MetaWindowActor *actor = meta_window_actor_from_window (self);
+  MetaWindowActor *actor = meta_window_actor_from_window (window);
   MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private (actor);
 
-  priv->round_clip_effect = create_clip_effect(actor);
-  g_clear_signal_handler(&priv->wm_class_changed_id, self);
+  if (!actor)
+    return;
+
+  // Re-evaluate whether this window should be clipped
+  gboolean should_clip = _meta_window_actor_should_clip(actor);
+  
+  if (should_clip != priv->should_clip) {
+    priv->should_clip = should_clip;
+    
+    if (should_clip && !priv->round_clip_effect) {
+      priv->round_clip_effect = meta_clip_effect_new();
+      priv->effect_setuped = FALSE;
+    } else if (!should_clip && priv->round_clip_effect) {
+      MetaSurfaceActor *surface = meta_window_actor_get_surface(actor);
+      if (surface) {
+        clutter_actor_remove_effect_by_name(CLUTTER_ACTOR(surface), "Rounded Corners Effect(Surface)");
+      }
+      g_clear_object(&priv->round_clip_effect);
+      priv->effect_setuped = FALSE;
+    }
+  }
+  
+  // Reset clip padding to force re-evaluation
+  priv->clip_padding[0] = -1;
+  
+  // Update the effect
+  meta_window_actor_update_glsl(actor);
+  
+  g_clear_signal_handler(&priv->wm_class_changed_id, window);
 }
 
 static void
@@ -558,6 +625,21 @@ meta_window_actor_dispose (GObject *object)
 
   meta_compositor_remove_window_actor (compositor, self);
 
+  // Clean up rounded corners effect
+  if (priv->round_clip_effect)
+    {
+      MetaSurfaceActor *surface = meta_window_actor_get_surface(self);
+      if (surface) {
+        clutter_actor_remove_effect_by_name(CLUTTER_ACTOR(surface), "Rounded Corners Effect(Surface)");
+      }
+      g_clear_object(&priv->round_clip_effect);
+    }
+
+  // Clean up signal handlers
+  if (priv->window && priv->wm_class_changed_id) {
+    g_clear_signal_handler(&priv->wm_class_changed_id, priv->window);
+  }
+
   g_clear_object (&priv->window);
 
   if (priv->surface)
@@ -584,8 +666,20 @@ meta_window_actor_set_property (GObject      *object,
     {
     case PROP_META_WINDOW:
       priv->window = g_value_dup_object (value);
-      if (priv->window->client_type == META_WINDOW_CLIENT_TYPE_X11)
+      
+      // Create clip effect if appropriate
+      if (priv->window->client_type == META_WINDOW_CLIENT_TYPE_X11) {
         priv->round_clip_effect = create_clip_effect(self);
+      } else {
+        // For non-X11 windows, set up a wm_class change listener
+        if (!priv->window->res_name) {
+          priv->wm_class_changed_id = g_signal_connect(priv->window, "notify::wm-class",
+                                                       G_CALLBACK(on_wm_class_changed), self);
+        } else {
+          priv->round_clip_effect = create_clip_effect(self);
+        }
+      }
+      
       g_signal_connect_object (priv->window, "notify::appears-focused",
                                G_CALLBACK (window_appears_focused_notify), self, 0);
       break;

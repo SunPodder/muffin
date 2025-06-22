@@ -2622,32 +2622,46 @@ meta_prefs_get_clip_edge_padding (const char *name, int padding[4])
   JsonObject *obj;
   JsonArray *arr;
 
+  // Initialize with default values
+  padding[0] = 0;
+  padding[1] = 0;
+  padding[2] = 0;
+  padding[3] = 0;
+
   if (!clip_edge_padding || !name) {
-    padding[0] = 0;
-    padding[1] = 0;
-    padding[2] = 0;
-    padding[3] = 0;
     return;
   }
 
   obj = json_node_get_object(clip_edge_padding);
-  arr = json_object_get_array_member(obj, "global");
-  obj = json_object_get_object_member(obj, "apps");
+  if (!obj) {
+    return;
+  }
 
-  if (json_object_has_member(obj, name))
-    arr = json_object_get_array_member(obj, name);
+  arr = json_object_get_array_member(obj, "global");
+  if (!arr || json_array_get_length(arr) != 4) {
+    return;
+  }
+
+  JsonObject *apps_obj = json_object_get_object_member(obj, "apps");
+  if (apps_obj && json_object_has_member(apps_obj, name)) {
+    JsonArray *app_arr = json_object_get_array_member(apps_obj, name);
+    if (app_arr && json_array_get_length(app_arr) == 4) {
+      arr = app_arr;
+    }
+  }
 
   // array: { left, right, top, bottom }
-  padding[0] = json_array_get_int_element(arr, 0) + 1;
+  padding[0] = json_array_get_int_element(arr, 0);
   padding[1] = json_array_get_int_element(arr, 1);
-  padding[2] = json_array_get_int_element(arr, 2) + 1;
+  padding[2] = json_array_get_int_element(arr, 2);
   padding[3] = json_array_get_int_element(arr, 3);
 }
 
 gboolean
 meta_prefs_in_round_corner_black_list(const char *name)
 {
-  g_return_val_if_fail(round_corner_blacklist, FALSE);
+  if (!round_corner_blacklist || !name)
+    return FALSE;
 
   int length = g_strv_length(round_corner_blacklist);
 
