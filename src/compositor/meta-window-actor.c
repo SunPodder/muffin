@@ -143,6 +143,8 @@ static gboolean
 meta_window_is_normal (MetaWindowActor *actor)
 {
   MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private (actor);
+  if (!priv->window)
+    return FALSE;
   MetaWindowType type = meta_window_get_window_type (priv->window);
 
 switch (type)
