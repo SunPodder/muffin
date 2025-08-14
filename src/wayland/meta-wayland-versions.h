@@ -28,7 +28,7 @@
 /* #define META_WL_REGISTRY_VERSION 1 */
 #define META_WL_CALLBACK_VERSION 1
 
-/* Not handled by mutter-wayland directly */
+/* Not handled by muffin-wayland directly */
 /* #define META_WL_SHM_VERSION        1 */
 /* #define META_WL_SHM_POOL_VERSION   1 */
 /* #define META_WL_DRM_VERSION        1 */
@@ -41,7 +41,7 @@
 #define META_ZXDG_SHELL_V6_VERSION          1
 #define META_WL_SHELL_VERSION               1
 #define META_WL_SEAT_VERSION                5
-#define META_WL_OUTPUT_VERSION              2
+#define META_WL_OUTPUT_VERSION              4
 #define META_XSERVER_VERSION                1
 #define META_GTK_SHELL1_VERSION             3
 #define META_WL_SUBCOMPOSITOR_VERSION       1
